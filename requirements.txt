@@ -1,0 +1,26 @@
+# Social Media Marketing Agent - Dependencies
+# All Google Technologies (No OpenAI)
+
+# Google AI/ML Libraries
+google-generativeai==0.8.3          # Google Gemini API for text generation
+google-cloud-aiplatform==1.70.0     # Google Vertex AI (Imagen) for image generation
+
+# Google Cloud Core
+google-auth==2.35.0                 # Google authentication
+google-auth-oauthlib==1.2.1         # OAuth for Google services
+google-cloud-core==2.4.1            # Google Cloud core functionality
+
+# Telegram Bot
+pyTelegramBotAPI==4.24.0            # Telegram bot framework
+
+# Streamlit Dashboard
+streamlit==1.40.1                   # Web dashboard framework
+pillow==11.0.0                      # Image processing for dashboard
+
+# Environment & Configuration
+python-dotenv==1.0.1                # Load .env files
+
+# Database (SQLite is built-in to Python, no extra package needed)
+
+# Additional utilities
+requests==2.32.3                    # HTTP requests

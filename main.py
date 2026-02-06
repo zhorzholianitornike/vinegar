@@ -18,6 +18,7 @@ from config import setup_google_credentials, validate_environment
 from database import Database
 from text_generator import TextGenerator
 from image_generator import ImageGenerator
+from scheduler import PostScheduler
 from telegram_bot import MarketingBot
 
 
@@ -88,13 +89,19 @@ def initialize_components():
         location=os.getenv("GCP_LOCATION", "us-central1")
     )
 
+    # Initialize scheduler
+    print("\n4️⃣ Initializing post scheduler...")
+    scheduler = PostScheduler(database=db)
+    scheduler.start_scheduler()  # Start background scheduler thread
+
     # Initialize Telegram bot
-    print("\n4️⃣ Initializing Telegram bot...")
+    print("\n5️⃣ Initializing Telegram bot...")
     bot = MarketingBot(
         bot_token=os.getenv("TELEGRAM_BOT_TOKEN"),
         database=db,
         text_generator=text_gen,
         image_generator=image_gen,
+        scheduler=scheduler,
         admin_chat_id=os.getenv("ADMIN_CHAT_ID")  # Optional
     )
 
@@ -102,7 +109,7 @@ def initialize_components():
     print("✅ All components initialized successfully!")
     print("=" * 50)
 
-    return db, text_gen, image_gen, bot
+    return db, text_gen, image_gen, scheduler, bot
 
 
 def run_telegram_bot(bot: MarketingBot):
@@ -133,7 +140,7 @@ def main():
     load_environment()
 
     # Initialize components
-    db, text_gen, image_gen, bot = initialize_components()
+    db, text_gen, image_gen, scheduler, bot = initialize_components()
 
     print("\n📋 Application Information:")
     print(f"   • Database: {db.db_path}")

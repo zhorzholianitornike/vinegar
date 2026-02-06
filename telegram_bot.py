@@ -9,9 +9,11 @@ import os
 import telebot
 from telebot import types
 from typing import Optional, Callable
+from datetime import datetime, timedelta
 from database import Database
 from text_generator import TextGenerator
 from image_generator import ImageGenerator
+from scheduler import PostScheduler
 
 
 class MarketingBot:
@@ -23,6 +25,7 @@ class MarketingBot:
         database: Database,
         text_generator: TextGenerator,
         image_generator: ImageGenerator,
+        scheduler: PostScheduler,
         admin_chat_id: Optional[int] = None
     ):
         """
@@ -33,12 +36,14 @@ class MarketingBot:
             database: Database instance
             text_generator: Text generator instance
             image_generator: Image generator instance
+            scheduler: Post scheduler instance
             admin_chat_id: Chat ID of the admin user (optional)
         """
         self.bot = telebot.TeleBot(bot_token)
         self.db = database
         self.text_gen = text_generator
         self.image_gen = image_generator
+        self.scheduler = scheduler
         self.admin_chat_id = admin_chat_id
 
         # Store current draft ID for callback context
@@ -166,6 +171,26 @@ class MarketingBot:
                 draft_id = int(action.split("_")[1])
                 self._approve_draft(call.message, draft_id)
 
+            elif action.startswith("publish_now_"):
+                draft_id = int(action.split("_")[2])
+                self._publish_now(call.message, draft_id)
+
+            elif action.startswith("schedule_1h_"):
+                draft_id = int(action.split("_")[2])
+                self._schedule_post(call.message, draft_id, hours=1)
+
+            elif action.startswith("schedule_3h_"):
+                draft_id = int(action.split("_")[2])
+                self._schedule_post(call.message, draft_id, hours=3)
+
+            elif action.startswith("schedule_tomorrow_"):
+                draft_id = int(action.split("_")[2])
+                self._schedule_post(call.message, draft_id, hours=24)
+
+            elif action.startswith("back_to_edit_"):
+                draft_id = int(action.split("_")[3])
+                self._back_to_edit(call.message, draft_id)
+
             elif action.startswith("regenerate_text_"):
                 draft_id = int(action.split("_")[2])
                 self._regenerate_text(call.message, draft_id)
@@ -239,19 +264,25 @@ class MarketingBot:
             self.db.connection.commit()
 
     def _approve_draft(self, message, draft_id: int):
-        """Approve a draft and mark as ready for publishing."""
+        """Approve a draft and show publish options."""
         self.db.update_draft_status(draft_id, "approved")
 
-        self.bot.edit_message_caption(
-            caption=message.caption + "\n\n✅ დამტკიცებულია!",
-            chat_id=message.chat.id,
-            message_id=message.message_id,
-            reply_markup=None  # Remove buttons
+        # Create publish options keyboard
+        markup = types.InlineKeyboardMarkup(row_width=1)
+
+        markup.add(
+            types.InlineKeyboardButton("🚀 დაუყოვნებლივ გამოქვეყნება", callback_data=f"publish_now_{draft_id}"),
+            types.InlineKeyboardButton("📅 დაგეგმვა (1 საათში)", callback_data=f"schedule_1h_{draft_id}"),
+            types.InlineKeyboardButton("📅 დაგეგმვა (3 საათში)", callback_data=f"schedule_3h_{draft_id}"),
+            types.InlineKeyboardButton("📅 დაგეგმვა (ხვალ)", callback_data=f"schedule_tomorrow_{draft_id}"),
+            types.InlineKeyboardButton("◀️ უკან", callback_data=f"back_to_edit_{draft_id}")
         )
 
-        self.bot.send_message(
-            message.chat.id,
-            f"✅ დრაფტი #{draft_id} დამტკიცებულია და მზადაა გამოსაქვეყნებლად!"
+        self.bot.edit_message_caption(
+            caption=message.caption + "\n\n✅ დამტკიცებულია! აირჩიე გამოქვეყნების ვარიანტი:",
+            chat_id=message.chat.id,
+            message_id=message.message_id,
+            reply_markup=markup
         )
 
     def _reject_draft(self, message, draft_id: int):
@@ -336,6 +367,74 @@ class MarketingBot:
                 types.InlineKeyboardButton("🌐 დაშბორდზე გადასვლა", url=f"{dashboard_url}/?draft_id={draft_id}")
             )
         )
+
+    def _publish_now(self, message, draft_id: int):
+        """Publish post immediately."""
+        result = self.scheduler.publish_now(draft_id)
+
+        if result['success']:
+            self.bot.edit_message_caption(
+                caption=message.caption + f"\n\n🎉 გამოქვეყნებულია!\n📅 {result['published_at'][:19]}",
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+                reply_markup=None
+            )
+
+            self.bot.send_message(
+                message.chat.id,
+                f"✅ პოსტი #{draft_id} წარმატებით გამოქვეყნდა!\n\n"
+                f"ახლა შეგიძლია გამოიყენო Facebook/Instagram-ზე:\n"
+                f"📝 ტექსტი: დაკოპირებული\n"
+                f"🖼 სურათი: {result['image_path']}"
+            )
+        else:
+            self.bot.send_message(
+                message.chat.id,
+                f"❌ გამოქვეყნება ვერ მოხერხდა: {result.get('error', 'უცნობი შეცდომა')}"
+            )
+
+    def _schedule_post(self, message, draft_id: int, hours: int):
+        """Schedule a post for future publication."""
+        from datetime import datetime, timedelta
+
+        scheduled_time = datetime.now() + timedelta(hours=hours)
+        success = self.scheduler.schedule_post(draft_id, scheduled_time)
+
+        if success:
+            time_str = scheduled_time.strftime("%Y-%m-%d %H:%M")
+
+            self.bot.edit_message_caption(
+                caption=message.caption + f"\n\n📅 დაგეგმილია: {time_str}",
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+                reply_markup=None
+            )
+
+            self.bot.send_message(
+                message.chat.id,
+                f"✅ პოსტი #{draft_id} დაგეგმილია:\n📅 {time_str}\n\n"
+                f"პოსტი ავტომატურად გამოქვეყნდება მითითებულ დროს."
+            )
+        else:
+            self.bot.send_message(
+                message.chat.id,
+                "❌ დაგეგმვა ვერ მოხერხდა. დარწმუნდი რომ პოსტი დამტკიცებულია."
+            )
+
+    def _back_to_edit(self, message, draft_id: int):
+        """Go back to edit mode."""
+        draft = self.db.get_draft(draft_id)
+
+        if draft:
+            # Restore original review markup
+            markup = self._create_review_markup(draft_id)
+
+            self.bot.edit_message_caption(
+                caption=f"🍯 {draft['honey_type']}\n\n{draft['post_text']}\n\n📋 Draft ID: #{draft_id}",
+                chat_id=message.chat.id,
+                message_id=message.message_id,
+                reply_markup=markup
+            )
 
     def _create_review_markup(self, draft_id: int) -> types.InlineKeyboardMarkup:
         """Create inline keyboard for review."""
